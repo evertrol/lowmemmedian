@@ -6,77 +6,125 @@
 #include <stdbool.h>
 #include <time.h>
 #include <errno.h>
-#include <omp.h>
+#include <pthread.h>
 
 
-int calccounts(double *data, size_t ndata, double partition,
+struct counter {
+		double *data;
+		size_t ndata;
+		double partition;
+		size_t nlow;
+		size_t nhigh;
+		double below;
+		double above;
+};
+
+int calccounts_threads(double *data, size_t ndata, double partition,
 			   size_t *nlow, size_t *nhigh, double *below, double *above);
-int calccounts_par(double *data, size_t ndata, double partition,
-			   size_t *nlow, size_t *nhigh, double *below, double *above);
+void *calccounts_threaded(void *counts);
 double calcgen(double *data, size_t ndata,
 			   double maxdiff, double factor, double decrease);
 double calc(double *data, size_t ndata);
 int runtests(void);
 
 
+void *
+calccounts_threaded(void *counts)
+{
+		struct counter *lcounts = counts;
+
+		lcounts->below = -(double)INFINITY;
+		lcounts->above = (double)INFINITY;
+		lcounts->nlow = 0;
+		lcounts->nhigh = 0;
+
+		for (size_t i = 0; i < lcounts->ndata; i++) {
+				double value = lcounts->data[i];
+				double partition = lcounts->partition;
+
+				if (value <= partition) {
+						lcounts->nlow += 1;
+				}
+				if (value >= partition) {
+						lcounts->nhigh += 1;
+				}
+				if (value < partition && lcounts->below < value) {
+						lcounts->below = value;
+				}
+				if (value > partition && lcounts->above > value) {
+						lcounts->above = value;
+				}
+		}
+		return NULL;
+}
+
+
 int
-calccounts(double *data, size_t ndata, double partition,
-		   size_t *nlow, size_t *nhigh, double *below, double *above)
+calccounts_threads(double *data, size_t ndata, double partition,
+					size_t *nlow, size_t *nhigh, double *below, double *above)
 {
 		*below = -(double)INFINITY;
 		*above = (double)INFINITY;
 		*nlow = 0;
 		*nhigh = 0;
-		for (size_t i = 0; i < ndata; i++) {
-				double value = data[i];
 
-				if (value <= partition) {
-						*nlow += 1;
-				}
-				if (value >= partition) {
-						*nhigh += 1;
-				}
-				if (value < partition && *below < value) {
-						*below = value;
-				}
-				if (value > partition && *above > value) {
-						*above = value;
+		size_t nthreads = 2;
+		char *nthreads_str = getenv("MEDIAN_NTHREADS");
+		if (nthreads_str) {
+				char *endptr;
+				errno = 0;
+				nthreads = (size_t)strtol(nthreads_str, &endptr, 10);
+				if (errno || *endptr != '\0') {
+						perror("invalid MEDIAN_NTHREADS value");
+						nthreads = 2;
 				}
 		}
 
-		return 0;
-}
+		errno = 0;
+		pthread_t *threads = calloc(nthreads, sizeof *threads);
+		struct counter *counts = calloc(nthreads, sizeof *counts);
+		if (!threads || !counts) {
+				perror("memory failure");
+				exit(EXIT_FAILURE);
+		}
+		size_t step = ndata / nthreads;
+		for (size_t i = 0; i < nthreads; i++) {
+				counts[i].data = data + i*step;
+				counts[i].ndata = step;
+				counts[i].partition = partition;
+				if (i == nthreads-1) {
+						counts[i].ndata = ndata - i*step;
+				}
+				errno = 0;
+				int status = pthread_create(
+						&threads[i], NULL, calccounts_threaded, &counts[i]);
+				if (status) {
+						perror("error creating thread");
+						exit(EXIT_FAILURE);
+				}
+
+		}
 
 
-int
-calccounts_par(double *data, size_t ndata, double partition,
-			   size_t *nlow, size_t *nhigh, double *below, double *above)
-{
-		size_t nlow_ = 0;
-		size_t nhigh_ = 0;
-		double below_ = -(double)INFINITY;
-		double above_ = (double)INFINITY;
-#pragma omp parallel for reduction(+:nlow_, nhigh_) reduction(max: below_) reduction(min: above_)
-		for (size_t i = 0; i < ndata; i++) {
-				double value = data[i];
-
-				if (value <= partition) {
-						nlow_ += 1;
+		for (size_t i = 0; i < nthreads; i++) {
+				errno = 0;
+				int status = pthread_join(threads[i], NULL);
+				if (status) {
+						perror("error joining thread");
+						exit(EXIT_FAILURE);
 				}
-				if (value >= partition) {
-						nhigh_ += 1;
+				*nlow += counts[i].nlow;
+				*nhigh += counts[i].nhigh;
+				if (*below < counts[i].below) {
+						*below = counts[i].below;
 				}
-				if (value < partition && below_ < value) {
-						below_ = value;
-				}
-				if (value > partition && above_ > value) {
-						above_ = value;
+				if (*above > counts[i].above) {
+						*above = counts[i].above;
 				}
 		}
-		*nlow = nlow_;
-		*nhigh = nhigh_;
-		*below = below_;
-		*above = above_;
+
+		free(threads);
+		free(counts);
 
 		return 0;
 }
@@ -121,7 +169,7 @@ calcgen(double *data, size_t ndata,
 		size_t nlow = 0;
 		size_t nhigh = 0;
 		while (1) {
-				calccounts_par(data, ndata, partition, &nlow, &nhigh, &below, &above);
+				calccounts_threads(data, ndata, partition, &nlow, &nhigh, &below, &above);
 				size_t nsame = nhigh + nlow - ndata;
 
 				if (nlow == nhigh) {
@@ -351,6 +399,8 @@ main(int argc, char *argv[]) {
 		diff = clock() - start;
 		double sec = (double)diff / CLOCKS_PER_SEC;
 		printf("Median = %.15lf (%f)\n", median, sec);
+
+		free(data);
 
 		return EXIT_SUCCESS;
 }

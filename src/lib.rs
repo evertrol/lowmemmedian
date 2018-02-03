@@ -1,5 +1,57 @@
-pub fn calcgen(data: &Vec<f64>, maxdiff: f64, factor: f64,
-               decrease: f64) -> f64 {
+#[macro_use]
+extern crate log;
+extern crate rayon;
+use rayon::prelude::*;
+
+pub fn calccounts(data: &[f64], partition: f64) -> (usize, usize, f64, f64) {
+    let mut below = -std::f64::INFINITY;
+    let mut above = std::f64::INFINITY;
+    let mut nlow = 0;
+    let mut nhigh = 0;
+    for &value in data.iter() {
+        if value <= partition {
+            nlow += 1;
+        }
+        if value >= partition {
+            nhigh += 1;
+        }
+        if value < partition && below < value {
+            below = value;
+        }
+        if value > partition && above > value {
+            above = value;
+        }
+    }
+    (nlow, nhigh, below, above)
+}
+
+pub fn getcounts(data: &[f64], partition: f64, nchunks: usize) -> (usize, usize, f64, f64) {
+    let chunksize = data.len() / nchunks;
+    let results: Vec<(usize, usize, f64, f64)> = data
+        .par_chunks(chunksize)
+        .map(|chunk| calccounts(chunk, partition))
+        .collect();
+
+    let mut nlow = 0;
+    let mut nhigh = 0;
+    let mut below = -std::f64::INFINITY;
+    let mut above = std::f64::INFINITY;
+
+    for values in &results {
+        nlow += values.0;
+        nhigh += values.1;
+        if values.2 > below {
+            below = values.2;
+        }
+        if values.3 < above {
+            above = values.3;
+        }
+    }
+
+    (nlow, nhigh, below, above)
+}
+
+pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks: usize) -> f64 {
     let len = data.len();
     if len == 0 {
         return std::f64::NAN;
@@ -8,8 +60,14 @@ pub fn calcgen(data: &Vec<f64>, maxdiff: f64, factor: f64,
         return data[0];
     }
     if len == 2 {
-        return (data[0] + data[1])/2.0;
+        return (data[0] + data[1]) / 2.0;
     }
+
+    let mdiff = if maxdiff >= 0.0 {
+        maxdiff
+    } else {
+        -maxdiff * len as f64
+    };
 
     let mut fact = factor;
     let mut prevdiff = std::f64::INFINITY;
@@ -19,28 +77,17 @@ pub fn calcgen(data: &Vec<f64>, maxdiff: f64, factor: f64,
     let mut delta = 0.0;
     let evenlen = len % 2 == 0;
 
-    loop {
-        let mut below = -std::f64::INFINITY;
-        let mut above = std::f64::INFINITY;
-        let mut nlow = 0;
-        let mut nhigh = 0;
+    debug!("Partition start (= mean), mdiff: {}, {}", partition, mdiff);
 
-        // Count values below and above the partition, and find the
-        // nearest values around the partition value
-        for &value in data.iter() {
-            if value <= partition {
-                nlow += 1;
-            }
-            if value >= partition {
-                nhigh += 1;
-            }
-            if value < partition && below < value {
-                below = value;
-            }
-            if value > partition && above > value {
-                above = value;
-            }
-        }
+    let mut iloop: u64 = 0;
+    loop {
+        iloop += 1;
+
+        let (nlow, nhigh, below, above) = if nchunks == 1 {
+            calccounts(data, partition)
+        } else {
+            getcounts(data, partition, nchunks)
+        };
 
         // Determine break criteria for the loop, or otherwise the
         // change in partition
@@ -50,8 +97,7 @@ pub fn calcgen(data: &Vec<f64>, maxdiff: f64, factor: f64,
                 partition = (below + above) / 2.0;
             }
             break;
-        }
-        else if nlow > nhigh {
+        } else if nlow > nhigh {
             if nlow - nhigh <= nsame {
                 partition = if nsame > 0 {
                     if evenlen && nsame == 1 {
@@ -59,25 +105,33 @@ pub fn calcgen(data: &Vec<f64>, maxdiff: f64, factor: f64,
                     } else {
                         partition
                     }
+                } else if evenlen {
+                    (below + above) / 2.0
                 } else {
-                    if evenlen {
-                        (below + above) / 2.0
-                    } else {
-                        below
-                    }
+                    below
                 };
                 break;
             }
             let diff = (nlow - nhigh - nsame) as f64;
-            if diff > maxdiff {
-                if prevdiff.abs() < diff {
+            debug!("diff, nsame = {}, {}", diff, nsame);
+            if diff > mdiff {
+                if diff > prevdiff.abs() {
                     // The change was overestimated
                     // Try again with a smaller scaling factor
-                    fact *= decrease;
+                    // Change `fact` by a minimum of `decrease`, but
+                    // more if we overestimated the change a lot
+                    let ratio = prevdiff.abs() / diff;
+                    if ratio < decrease {
+                        fact *= ratio;
+                    } else {
+                        fact *= decrease;
+                    }
+                    debug!(
+                        "< fact, ratio, decrease = {}, {}, {}",
+                        fact, ratio, decrease
+                    );
                     partition = prevpartition + prevdiff * fact * delta;
                 } else {
-                    // Reset the scaling factor
-                    fact = factor;
                     prevdiff = -diff;
                     delta = above - below;
                     prevpartition = partition;
@@ -94,45 +148,57 @@ pub fn calcgen(data: &Vec<f64>, maxdiff: f64, factor: f64,
                     } else {
                         partition
                     }
+                } else if evenlen {
+                    (below + above) / 2.0
                 } else {
-                    if evenlen {
-                        (below + above) / 2.0
-                    } else {
-                        above
-                    }
+                    above
                 };
                 break;
             }
             let diff = (nhigh - nlow - nsame) as f64;
-            if diff > maxdiff {
-                if prevdiff.abs() < diff {
+            debug!("diff, nsame = {}, {}", diff, nsame);
+            if diff > mdiff {
+                if diff > prevdiff.abs() {
                     // The change was overestimated
                     // Try again with a smaller scaling factor
-                    fact *= decrease;
+                    // Change `fact` by a minimum of `decrease`, but
+                    // more if we overestimated the change a lot
+                    let ratio = prevdiff.abs() / diff;
+                    if ratio < decrease {
+                        fact *= ratio;
+                    } else {
+                        fact *= decrease;
+                    }
+                    debug!(
+                        "< fact, ratio, decrease = {}, {}, {}",
+                        fact, ratio, decrease
+                    );
                     partition = prevpartition + prevdiff * fact * delta;
                 } else {
-                    // Reset the scaling factor
-                    fact = factor;
                     prevdiff = diff;
                     delta = above - below;
                     prevpartition = partition;
-                    partition += diff * fact  * delta;
+                    partition += diff * fact * delta;
                 }
             } else {
                 partition = above;
             }
         }
+        debug!(
+            "nlow, nhigh, below, above, delta = {}, {}, {}, {}, {}",
+            nlow, nhigh, below, above, delta
+        );
+        debug!("iloop, partition: {}, {}", iloop, partition);
+        debug!("");
     }
+    debug!("iloop = {}", iloop);
 
     partition
 }
 
-
-pub fn calc(data: &Vec<f64>) -> f64 {
-    calcgen(data, 5.0, 0.2, 1.5)
+pub fn calc(data: &[f64]) -> f64 {
+    calcgen(data, 5.0, 0.2, 0.5, 1)
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -200,7 +266,6 @@ mod tests {
 
         let data: Vec<f64> = vec![std::f64::INFINITY, 6.0, std::f64::INFINITY];
         assert_eq!(calc(&data), std::f64::INFINITY);
-
     }
 
     #[test]
@@ -229,7 +294,6 @@ mod tests {
         assert!((calc(&data) - 3.0).abs() <= EPS);
         let data: Vec<f64> = vec![1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0, 4.0];
         assert!((calc(&data) - 3.0).abs() <= EPS);
-
     }
 
     #[test]
@@ -282,6 +346,5 @@ mod tests {
 
         let data: Vec<f64> = vec![1.0, 2.0, 3.0, 5.0];
         assert!((calc(&data) - 2.5).abs() <= EPS);
-
     }
 }
