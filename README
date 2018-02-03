@@ -1,0 +1,19 @@
+This is a low memory-usage median algorithm. It does not copy the data
+and then perform a quicksort or quickselect, but uses the actual data
+to calculate the median (without modifying the actual data).
+
+It works by starting with an estimated partition value at the mean
+value and calculate the number of values below and above that
+partition value.
+
+Further iterations recalculate a partitional value from the difference
+between the number of below and above counts, until this difference is
+small enough that single steps lead to the actual median value.
+
+The algorithm is coded in Rust, and tested with rustc version 1.23.0
+and cargo version 0.24.0. It is provided as a Rust library project,
+with an executable for reading simple data files (with one plain
+number per line).
+A C implementation is provided as well.
+
+This work is licensed under the OpenBSD License.

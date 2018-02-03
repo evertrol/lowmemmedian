@@ -1,0 +1,16 @@
+[package]
+name = "lowmemmedian"
+version = "0.1.0"
+authors = ["Evert Rol <evert.rol@gmail.com>"]
+
+[dependencies]
+time = "0.1"
+
+[lib]
+name = "lowmemmedian"
+path = "src/lib.rs"
+
+
+[[bin]]
+name = "stats"
+path = "src/bin/stats.rs"
