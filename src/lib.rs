@@ -80,10 +80,7 @@ fn nhigh_nlow(
             } else {
                 scalings.factor *= scalings.decrease;
             }
-            debug!(
-                "< factor, ratio, decrease = {}, {}, {}",
-                scalings.factor, ratio, scalings.decrease
-            );
+            debug!("Rescaled to factor, ratio = {}, {}", scalings.factor, ratio);
             *prevpartition + scalings.prevdiff * scalings.factor * scalings.delta * sign
         } else {
             scalings.prevdiff = scalings.diff;
@@ -144,6 +141,8 @@ pub fn calculate(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks
         delta: 0.0,
         decrease,
     };
+
+    debug!("Initial scalings: factor, decrease = {}, {}", scalings.factor, scalings.decrease);
 
     let sum: f64 = data.iter().sum();
     let evenlen = len % 2 == 0;
@@ -213,7 +212,6 @@ pub fn calculate(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks
             nlow, nhigh, below, above, scalings.delta
         );
         debug!("iloop, partition: {}, {}", iloop, partition);
-        debug!("");
     }
     debug!("iloop = {}", iloop);
 
