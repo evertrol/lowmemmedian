@@ -41,7 +41,7 @@ fn main() {
     data.truncate(max);
 
     let start = PreciseTime::now();
-    let median = lowmemmedian::calcgen(&data, 5.0, 0.2, 0.5, nchunks);
+    let median = lowmemmedian::calculate(&data, 5.0, 0.2, 0.5, nchunks);
     let duration = start.to(PreciseTime::now());
     let microsecs = duration.num_microseconds().unwrap();
     let seconds = (microsecs as f64) / 1e6;

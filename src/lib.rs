@@ -3,6 +3,15 @@ extern crate log;
 extern crate rayon;
 use rayon::prelude::*;
 
+struct Scalings {
+    diff: f64,
+    factor: f64,
+    maxdiff: f64,
+    prevdiff: f64,
+    delta: f64,
+    decrease: f64,
+}
+
 pub fn calccounts(data: &[f64], partition: f64) -> (usize, usize, f64, f64) {
     let mut below = -std::f64::INFINITY;
     let mut above = std::f64::INFINITY;
@@ -51,7 +60,65 @@ pub fn getcounts(data: &[f64], partition: f64, nchunks: usize) -> (usize, usize,
     (nlow, nhigh, below, above)
 }
 
-pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks: usize) -> f64 {
+fn nhigh_nlow(
+    scalings: &mut Scalings,
+    sign: f64,
+    partition: f64,
+    prevpartition: &mut f64,
+    below: f64,
+    above: f64,
+) -> f64 {
+    if scalings.diff > scalings.maxdiff {
+        if scalings.diff > scalings.prevdiff {
+            // The change was overestimated
+            // Try again with a smaller scaling factor
+            // Change `factor` by a minimum of `decrease`, but
+            // more if we overestimated the change a lot
+            let ratio = scalings.prevdiff / scalings.diff;
+            if ratio < scalings.decrease {
+                scalings.factor *= ratio;
+            } else {
+                scalings.factor *= scalings.decrease;
+            }
+            debug!(
+                "< factor, ratio, decrease = {}, {}, {}",
+                scalings.factor, ratio, scalings.decrease
+            );
+            *prevpartition + scalings.prevdiff * scalings.factor * scalings.delta * sign
+        } else {
+            scalings.prevdiff = scalings.diff;
+            *prevpartition = partition;
+            scalings.delta = above - below;
+            partition + scalings.diff * scalings.factor * scalings.delta * sign
+        }
+    } else if sign < 0.0 {
+        below
+    } else {
+        above
+    }
+}
+
+pub fn calc_final_partition(
+    nsame: usize,
+    evenlen: bool,
+    below: f64,
+    above: f64,
+    partition: f64,
+) -> f64 {
+    if nsame > 0 {
+        if evenlen && nsame == 1 {
+            (below + partition) / 2.0
+        } else {
+            partition
+        }
+    } else if evenlen {
+        (below + above) / 2.0
+    } else {
+        below
+    }
+}
+
+pub fn calculate(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks: usize) -> f64 {
     let len = data.len();
     if len == 0 {
         return std::f64::NAN;
@@ -63,21 +130,30 @@ pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks: 
         return (data[0] + data[1]) / 2.0;
     }
 
-    let mdiff = if maxdiff >= 0.0 {
+    let maxdiff = if maxdiff >= 0.0 {
         maxdiff
     } else {
         -maxdiff * len as f64
     };
 
-    let mut fact = factor;
-    let mut prevdiff = std::f64::INFINITY;
+    let mut scalings = Scalings {
+        diff: maxdiff,
+        factor,
+        maxdiff,
+        prevdiff: std::f64::INFINITY,
+        delta: 0.0,
+        decrease,
+    };
+
     let sum: f64 = data.iter().sum();
+    let evenlen = len % 2 == 0;
     let mut partition = sum / (len as f64);
     let mut prevpartition = partition;
-    let mut delta = 0.0;
-    let evenlen = len % 2 == 0;
 
-    debug!("Partition start (= mean), mdiff: {}, {}", partition, mdiff);
+    debug!(
+        "Partition start (= mean), maxdiff: {}, {}",
+        partition, maxdiff
+    );
 
     let mut iloop: u64 = 0;
     loop {
@@ -98,95 +174,43 @@ pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks: 
             }
             break;
         } else if nlow > nhigh {
+            // above the median
             if nlow - nhigh <= nsame {
-                partition = if nsame > 0 {
-                    if evenlen && nsame == 1 {
-                        (below + partition) / 2.0
-                    } else {
-                        partition
-                    }
-                } else if evenlen {
-                    (below + above) / 2.0
-                } else {
-                    below
-                };
+                partition = calc_final_partition(nsame, evenlen, below, above, partition);
                 break;
             }
-            let diff = (nlow - nhigh - nsame) as f64;
-            debug!("diff, nsame = {}, {}", diff, nsame);
-            if diff > mdiff {
-                if diff > prevdiff.abs() {
-                    // The change was overestimated
-                    // Try again with a smaller scaling factor
-                    // Change `fact` by a minimum of `decrease`, but
-                    // more if we overestimated the change a lot
-                    let ratio = prevdiff.abs() / diff;
-                    if ratio < decrease {
-                        fact *= ratio;
-                    } else {
-                        fact *= decrease;
-                    }
-                    debug!(
-                        "< fact, ratio, decrease = {}, {}, {}",
-                        fact, ratio, decrease
-                    );
-                    partition = prevpartition + prevdiff * fact * delta;
-                } else {
-                    prevdiff = -diff;
-                    delta = above - below;
-                    prevpartition = partition;
-                    partition -= diff * fact * delta;
-                }
-            } else {
-                partition = below;
-            }
-        } else {  // nlow < nhigh
+            scalings.diff = (nlow - nhigh - nsame) as f64;
+            let sign = -1.0;
+            debug!("diff, nsame = {}, {}", scalings.diff, nsame);
+            partition = nhigh_nlow(
+                &mut scalings,
+                sign,
+                partition,
+                &mut prevpartition,
+                below,
+                above,
+            );
+        } else {
+            // below the median
             if nhigh - nlow <= nsame {
-                partition = if nsame > 0 {
-                    if evenlen && nsame == 1 {
-                        (partition + above) / 2.0
-                    } else {
-                        partition
-                    }
-                } else if evenlen {
-                    (below + above) / 2.0
-                } else {
-                    above
-                };
+                partition = calc_final_partition(nsame, evenlen, above, below, partition);
                 break;
             }
-            let diff = (nhigh - nlow - nsame) as f64;
-            debug!("diff, nsame = {}, {}", diff, nsame);
-            if diff > mdiff {
-                if diff > prevdiff.abs() {
-                    // The change was overestimated
-                    // Try again with a smaller scaling factor
-                    // Change `fact` by a minimum of `decrease`, but
-                    // more if we overestimated the change a lot
-                    let ratio = prevdiff.abs() / diff;
-                    if ratio < decrease {
-                        fact *= ratio;
-                    } else {
-                        fact *= decrease;
-                    }
-                    debug!(
-                        "< fact, ratio, decrease = {}, {}, {}",
-                        fact, ratio, decrease
-                    );
-                    partition = prevpartition + prevdiff * fact * delta;
-                } else {
-                    prevdiff = diff;
-                    delta = above - below;
-                    prevpartition = partition;
-                    partition += diff * fact * delta;
-                }
-            } else {
-                partition = above;
-            }
+            scalings.diff = (nhigh - nlow - nsame) as f64;
+            let sign = 1.0;
+            debug!("diff, nsame = {}, {}", scalings.diff, nsame);
+            partition = nhigh_nlow(
+                &mut scalings,
+                sign,
+                partition,
+                &mut prevpartition,
+                below,
+                above,
+            );
         }
         debug!(
             "nlow, nhigh, below, above, delta = {}, {}, {}, {}, {}",
-            nlow, nhigh, below, above, delta
+            nlow, nhigh, below, above, scalings.delta
         );
         debug!("iloop, partition: {}, {}", iloop, partition);
         debug!("");
@@ -197,7 +221,7 @@ pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64, nchunks: 
 }
 
 pub fn calc(data: &[f64]) -> f64 {
-    calcgen(data, 5.0, 0.2, 0.5, 1)
+    calculate(data, 5.0, 0.2, 0.5, 1)
 }
 
 #[cfg(test)]
