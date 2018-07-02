@@ -1,5 +1,6 @@
 extern crate env_logger;
 extern crate lowmemmedian;
+extern crate num_cpus;
 extern crate time;
 use std::env;
 use std::fs::File;
@@ -20,7 +21,7 @@ fn main() {
     let nchunks: usize = if args.len() > 3 {
         args[3].parse().unwrap()
     } else {
-        8
+        num_cpus::get()
     };
     let max: usize = args[1].parse().unwrap();
     let file = File::open(args[2].as_str()).expect("File not found");
