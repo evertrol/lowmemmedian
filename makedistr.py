@@ -47,11 +47,16 @@ def makeboltzmann(sigma=1000.0, n=1000, high=100, **kwargs):
     data = data**2 * np.exp(-data**2/sigma)
     return data
 
+def makeexp(n=1000, low=1, high=1e3, **kwargs):
+    data = makeflat(n=n, low=1, high=2, **kwargs)
+    x = np.log(1e3)/np.log(2)
+    data = data**x
+    return data
 
 parser = argparse.ArgumentParser()
 parser.add_argument('type', choices=['normal', 'bimodal', 'flat', 'log',
                                      'lognormal', 'data', 'planck',
-                                     'boltzmann', 'rayleigh'])
+                                     'boltzmann', 'rayleigh', 'exp'])
 parser.add_argument('--ndata', '-n', type=int, default=1000)
 parser.add_argument('--ndata2', '-n2', type=int, default=0)
 parser.add_argument('--mu', type=float, default=1)
