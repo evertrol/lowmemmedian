@@ -368,5 +368,8 @@ mod tests {
 
         let data: Vec<f64> = vec![1.0, 2.0, 3.0, 5.0];
         assert!((calc(&data) - 2.5).abs() <= EPS);
+
+        let data: Vec<f64> = vec![1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0];
+        assert!((calc(&data) - 16.0).abs() <= EPS);
     }
 }
