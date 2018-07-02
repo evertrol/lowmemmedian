@@ -38,11 +38,12 @@ def main(ndata, path):
     time.sleep(SLEEP)
     gc.collect()
     time.sleep(SLEEP)
-    print('mean =', data.mean())
+    print('Mean = {:.10e}'.format(data.mean()))
     t = time.process_time()
     m = np.median(data)
     t = time.process_time() - t
-    print('Median =', m, ';', t, 'seconds')
+    print('Median = {:.10e}'.format(m))
+    print("Duration =", t, "seconds")
 
 
 if __name__ == '__main__':
