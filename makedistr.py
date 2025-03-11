@@ -1,10 +1,9 @@
 import argparse
 import numpy as np
-import scipy.stats
 import matplotlib as mpl
+from matplotlib import pyplot as plt
 
 mpl.use("Agg")
-from matplotlib import pyplot as plt
 
 
 def makenormal(mu=1, sigma=1, n=1000, **kwargs):
@@ -50,7 +49,6 @@ def makerayleigh(sigma=1.0, n=1000, high=1000, **kwargs):
 
 
 def makeboltzmann(sigma=1000.0, n=1000, high=100, **kwargs):
-    erf(data)
     data = np.random.uniform(low=0, high=high, size=n)
     data = data**2 * np.exp(-(data**2) / sigma)
     return data
