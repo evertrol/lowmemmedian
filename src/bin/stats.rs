@@ -1,11 +1,10 @@
 extern crate env_logger;
 extern crate lowmemmedian;
-extern crate time;
 use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::process::exit;
-use time::PreciseTime;
+use std::time::Instant;
 
 fn main() {
     env_logger::init();
@@ -33,10 +32,10 @@ fn main() {
 
     println!("Read {} lines correctly", data.len());
     data.truncate(ndata);
-    let start = PreciseTime::now();
+    let start = Instant::now();
     let median = lowmemmedian::calcgen(&data, 10.0, 0.2, 0.5);
-    let duration = start.to(PreciseTime::now());
-    let microsecs = duration.num_microseconds().unwrap();
+    let duration = start.elapsed();
+    let microsecs = duration.as_micros();
     let seconds = (microsecs as f64) / 1e6;
     println!("Median (duration) = {:.10} ( {} sec.)", median, seconds);
 }
