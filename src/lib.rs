@@ -1,9 +1,10 @@
 #[macro_use]
 extern crate log;
+use std::cmp::Ordering;
 
 pub fn calccounts(data: &[f64], partition: f64) -> (usize, usize, f64, f64) {
-    let mut below = -std::f64::INFINITY;
-    let mut above = std::f64::INFINITY;
+    let mut below = -f64::INFINITY;
+    let mut above = f64::INFINITY;
     let mut nlow = 0;
     let mut nhigh = 0;
     for &value in data.iter() {
@@ -26,7 +27,7 @@ pub fn calccounts(data: &[f64], partition: f64) -> (usize, usize, f64, f64) {
 pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64) -> f64 {
     let len = data.len();
     if len == 0 {
-        return std::f64::NAN;
+        return f64::NAN;
     }
     if len == 1 {
         return data[0];
@@ -42,7 +43,7 @@ pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64) -> f64 {
     };
 
     let mut fact = factor;
-    let mut prevdiff = std::f64::INFINITY;
+    let mut prevdiff = f64::INFINITY;
     let sum: f64 = data.iter().sum();
     let mut partition = sum / (len as f64);
     let mut prevpartition = partition;
@@ -58,98 +59,102 @@ pub fn calcgen(data: &[f64], maxdiff: f64, factor: f64, decrease: f64) -> f64 {
         // Determine break criteria for the loop, or otherwise the
         // change in partition
         let nsame = nhigh + nlow - len;
-        if nlow == nhigh {
-            if nsame == 0 {
-                partition = (below + above) / 2.0;
-            }
-            break;
-        } else if nlow > nhigh {
-            if nlow - nhigh <= nsame {
-                partition = if nsame > 0 {
-                    if evenlen && nsame == 1 {
-                        (below + partition) / 2.0
-                    } else {
-                        partition
-                    }
-                } else if evenlen {
-                    (below + above) / 2.0
-                } else {
-                    below
-                };
+        match nlow.cmp(&nhigh) {
+            Ordering::Equal => {
+                if nsame == 0 {
+                    partition = (below + above) / 2.0;
+                }
                 break;
             }
-            let diff = (nlow - nhigh - nsame) as f64;
-            debug!("diff, nsame = {}, {}", diff, nsame);
-            if diff > mdiff {
-                if diff > prevdiff.abs() {
-                    // The change was overestimated
-                    // Try again with a smaller scaling factor
-                    // Change `fact` by a minimum of `decrease`, but
-                    // more if we overestimated the change a lot
-                    let ratio = prevdiff.abs() / diff;
-                    if ratio < decrease {
-                        fact *= ratio;
+            Ordering::Greater => {
+                if nlow - nhigh <= nsame {
+                    partition = if nsame > 0 {
+                        if evenlen && nsame == 1 {
+                            (below + partition) / 2.0
+                        } else {
+                            partition
+                        }
+                    } else if evenlen {
+                        (below + above) / 2.0
                     } else {
-                        fact *= decrease;
-                    }
-                    debug!(
-                        "< fact, ratio, decrease = {}, {}, {}",
-                        fact, ratio, decrease
-                    );
-                    partition = prevpartition + prevdiff * fact * delta;
-                } else {
-                    prevdiff = -diff;
-                    delta = above - below;
-                    prevpartition = partition;
-                    partition -= diff * fact * delta;
+                        below
+                    };
+                    break;
                 }
-            } else {
-                partition = below;
-            }
-        } else {  // nlow < nhigh
-            if nhigh - nlow <= nsame {
-                partition = if nsame > 0 {
-                    if evenlen && nsame == 1 {
-                        (partition + above) / 2.0
+                let diff = (nlow - nhigh - nsame) as f64;
+                debug!("diff, nsame = {}, {}", diff, nsame);
+                if diff > mdiff {
+                    if diff > prevdiff.abs() {
+                        // The change was overestimated
+                        // Try again with a smaller scaling factor
+                        // Change `fact` by a minimum of `decrease`, but
+                        // more if we overestimated the change a lot
+                        let ratio = prevdiff.abs() / diff;
+                        if ratio < decrease {
+                            fact *= ratio;
+                        } else {
+                            fact *= decrease;
+                        }
+                        debug!(
+                            "< fact, ratio, decrease = {}, {}, {}",
+                            fact, ratio, decrease
+                        );
+                        partition = prevpartition + prevdiff * fact * delta;
                     } else {
-                        partition
+                        prevdiff = -diff;
+                        delta = above - below;
+                        prevpartition = partition;
+                        partition -= diff * fact * delta;
                     }
-                } else if evenlen {
-                    (below + above) / 2.0
                 } else {
-                    above
-                };
-                break;
-            }
-            let diff = (nhigh - nlow - nsame) as f64;
-            debug!("diff, nsame = {}, {}", diff, nsame);
-            if diff > mdiff {
-                if diff > prevdiff.abs() {
-                    // The change was overestimated
-                    // Try again with a smaller scaling factor
-                    // Change `fact` by a minimum of `decrease`, but
-                    // more if we overestimated the change a lot
-                    let ratio = prevdiff.abs() / diff;
-                    if ratio < decrease {
-                        fact *= ratio;
-                    } else {
-                        fact *= decrease;
-                    }
-                    debug!(
-                        "> fact, ratio, decrease = {}, {}, {}",
-                        fact, ratio, decrease
-                    );
-                    partition = prevpartition + prevdiff * fact * delta;
-                } else {
-                    prevdiff = diff;
-                    delta = above - below;
-                    prevpartition = partition;
-                    partition += diff * fact * delta;
+                    partition = below;
                 }
-            } else {
-                partition = above;
             }
-        }
+            Ordering::Less => {
+                if nhigh - nlow <= nsame {
+                    partition = if nsame > 0 {
+                        if evenlen && nsame == 1 {
+                            (partition + above) / 2.0
+                        } else {
+                            partition
+                        }
+                    } else if evenlen {
+                        (below + above) / 2.0
+                    } else {
+                        above
+                    };
+                    break;
+                }
+                let diff = (nhigh - nlow - nsame) as f64;
+                debug!("diff, nsame = {}, {}", diff, nsame);
+                if diff > mdiff {
+                    if diff > prevdiff.abs() {
+                        // The change was overestimated
+                        // Try again with a smaller scaling factor
+                        // Change `fact` by a minimum of `decrease`, but
+                        // more if we overestimated the change a lot
+                        let ratio = prevdiff.abs() / diff;
+                        if ratio < decrease {
+                            fact *= ratio;
+                        } else {
+                            fact *= decrease;
+                        }
+                        debug!(
+                            "> fact, ratio, decrease = {}, {}, {}",
+                            fact, ratio, decrease
+                        );
+                        partition = prevpartition + prevdiff * fact * delta;
+                    } else {
+                        prevdiff = diff;
+                        delta = above - below;
+                        prevpartition = partition;
+                        partition += diff * fact * delta;
+                    }
+                } else {
+                    partition = above;
+                }
+            }
+        };
         debug!(
             "nlow, nhigh, below, above, delta = {}, {}, {}, {}, {}",
             nlow, nhigh, below, above, delta
@@ -183,9 +188,9 @@ mod tests {
         let data: Vec<f64> = vec![5.0];
         assert!((calc(&data) - 5.0).abs() <= EPS);
 
-        let data = vec![std::f64::INFINITY];
+        let data = vec![f64::INFINITY];
         let m = calc(&data);
-        assert_eq!(m, std::f64::INFINITY);
+        assert_eq!(m, f64::INFINITY);
     }
 
     #[test]
@@ -196,9 +201,9 @@ mod tests {
         let data: Vec<f64> = vec![5.0, 5.0];
         assert!((calc(&data) - 5.0).abs() <= EPS);
 
-        let data: Vec<f64> = vec![5.0, std::f64::INFINITY];
+        let data: Vec<f64> = vec![5.0, f64::INFINITY];
         let m = calc(&data);
-        assert_eq!(m, std::f64::INFINITY);
+        assert_eq!(m, f64::INFINITY);
     }
 
     #[test]
@@ -227,11 +232,11 @@ mod tests {
         let data: Vec<f64> = vec![5.0, 5.0, 5.0];
         assert!((calc(&data) - 5.0).abs() <= EPS);
 
-        let data: Vec<f64> = vec![5.0, 6.0, std::f64::INFINITY];
+        let data: Vec<f64> = vec![5.0, 6.0, f64::INFINITY];
         assert!((calc(&data) - 6.0).abs() <= EPS);
 
-        let data: Vec<f64> = vec![std::f64::INFINITY, 6.0, std::f64::INFINITY];
-        assert_eq!(calc(&data), std::f64::INFINITY);
+        let data: Vec<f64> = vec![f64::INFINITY, 6.0, f64::INFINITY];
+        assert_eq!(calc(&data), f64::INFINITY);
     }
 
     #[test]
